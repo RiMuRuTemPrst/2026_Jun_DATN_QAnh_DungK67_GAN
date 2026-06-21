@@ -22,7 +22,7 @@ A general CNN architecture is shown in Figure~\ref{fig:cnn-overview}. The input 
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=\textwidth]{Images/overview_CNN.png}
-    \caption{General structure of a convolutional neural network \cite{developersbreachCNN}}
+    \caption[General structure of a convolutional neural network]{General structure of a convolutional neural network \cite{developersbreachCNN}}
     \label{fig:cnn-overview}
 \end{figure}
 
@@ -90,7 +90,39 @@ where $x$ is the input feature map and $F(x)$ is the transformation produced by 
 
 \paragraph{Transposed Convolution and Up-Sampling}
 
-While the encoder reduces spatial resolution, the generator must increase resolution to reconstruct the output image. This is achieved by up-sampling operations, most commonly transposed convolution (also called deconvolution) or nearest-neighbor up-sampling followed by convolution. Transposed convolution can be understood as the inverse spatial operation of a normal convolution: it expands the feature map and then applies a learnable kernel to fill in the higher-resolution detail. In the HiFiC generator, several up-convolution blocks progressively restore the spatial resolution of the latent representation back to the original image size.
+While the encoder reduces spatial resolution, the generator must increase resolution to reconstruct the output image. This is achieved by up-sampling operations, most commonly transposed convolution (also called deconvolution or fractionally-strided convolution)~\cite{huytran2021transposedconv}. Whereas a normal convolution performs a many-to-one mapping that aggregates a local input window into a single output value, transposed convolution performs the inverse one-to-many mapping: each input value is multiplied by the entire kernel and its contribution is spread across a neighbourhood of output positions, thereby expanding the feature map. It provides a \emph{learnable} up-sampling, in contrast to fixed methods such as nearest-neighbor or bilinear interpolation.
+
+For an input of size $i$, kernel size $k$, stride $s$, and padding $p$, the output size of a transposed convolution is
+\begin{equation}
+o = (i - 1)\,s + k - 2p .
+\end{equation}
+Unlike the normal convolution formula, no floor operation appears because the stride multiplies the spacing between projected input samples instead of dividing the input size; a stride $s>1$ therefore \emph{increases} the output resolution. In the HiFiC generator, several up-convolution blocks each apply a $3\times3$ transposed convolution with stride two, progressively restoring the spatial resolution of the latent representation back to the original image size.
+
+In practice, deep-learning frameworks compute a transposed convolution by reducing it to an ordinary convolution, as illustrated in Figure~\ref{fig:transposed_conv_steps}. Starting from the stride $s$ and padding $p$, the input is first expanded by inserting $z = s-1$ zeros between adjacent rows and columns; a border of $p' = k-p-1$ zeros is then added around the expanded input; finally a standard convolution with unit stride is slid over the result to produce the up-sampled output. This zero-insertion procedure is what allows a network to learn the up-sampling weights while reusing a conventional convolution operator.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{Images/transposed_conv_steps.png}
+    \caption[Four-step computation of a transposed convolution]{Four-step computation of a transposed convolution \cite{huytran2021transposedconv}}
+    \label{fig:transposed_conv_steps}
+\end{figure}
+
+\paragraph{Scatter and Gather Views of Transposed Convolution}
+
+Transposed convolution can be computed in two mathematically equivalent ways, illustrated in Figure~\ref{fig:scatter_gather}.
+
+In the \textbf{scatter} view (top of Figure~\ref{fig:scatter_gather}), the operation follows its natural definition. Each input pixel is multiplied by every kernel tap, producing a weighted copy of the kernel that is placed (scattered) onto the output grid at a position determined by the stride. Because the strided placements of neighbouring input pixels overlap, output positions that receive contributions from several input pixels are summed. A single output pixel is therefore written several times and is only complete after all input pixels have scattered their contributions, which requires an accumulation buffer over the output.
+
+In the \textbf{gather} view (bottom of Figure~\ref{fig:scatter_gather}), the same result is obtained by reducing the problem to a standard convolution: zeros are inserted between the input samples (and around the border) according to the stride, the kernel is flipped ($180^\circ$ rotation), and an ordinary stride-one convolution is then applied to the zero-expanded input. Each output pixel now gathers a fixed local window, exactly as in a normal convolution. This view is convenient for analysis and for reusing a standard convolution engine, but the inserted zeros lead to wasted multiplications.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.82\textwidth]{Images/Scatter_Gather.png}
+    \caption{Scatter and gather views of a $2\times2$ transposed convolution with stride two}
+    \label{fig:scatter_gather}
+\end{figure}
+
+The choice between the scatter and gather formulations directly shapes the hardware design of the up-convolution accelerator presented in \hyperref[chap:implementation]{Chapter~3}: the scatter formulation avoids the wasted multiplications of the zero-inserted gather formulation, but in exchange requires a row-wide accumulation buffer because each output pixel is updated several times.
 
 \subsubsection{Advantages and Limitations of CNNs for Hardware Acceleration}
 
@@ -228,7 +260,7 @@ Fig.~\ref{fig:ug1399_hls_steps} illustrates the main steps of HLS. The tool comp
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.78\textwidth]{Images/ug1399_hls_steps.png}
-    \caption{HLS compilation, scheduling, binding, and RTL generation flow \cite{amd2026vitisHls}}
+    \caption[HLS compilation, scheduling, binding, and RTL generation flow]{HLS compilation, scheduling, binding, and RTL generation flow \cite{amd2026vitisHls}}
     \label{fig:ug1399_hls_steps}
 \end{figure}
 
@@ -264,7 +296,7 @@ Fig.~\ref{fig:ug1399_scheduling_binding} shows a simplified scheduling and bindi
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.82\textwidth]{Images/ug1399_scheduling_binding.png}
-    \caption{Scheduling and binding example \cite{amd2026vitisHls}}
+    \caption[Scheduling and binding example]{Scheduling and binding example \cite{amd2026vitisHls}}
     \label{fig:ug1399_scheduling_binding}
 \end{figure}
 
@@ -279,7 +311,7 @@ Fig.~\ref{fig:ug1399_loop_pipeline} demonstrates this timing change. Without loo
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.82\textwidth]{Images/ug1399_loop_pipeline.png}
-    \caption{Loop pipeline timing example \cite{amd2026vitisHls}}
+    \caption[Loop pipeline timing example]{Loop pipeline timing example \cite{amd2026vitisHls}}
     \label{fig:ug1399_loop_pipeline}
 \end{figure}
 
@@ -430,7 +462,7 @@ The \texttt{\#pragma HLS DATAFLOW} directive enables task-level pipelining. It a
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.82\textwidth]{Images/ug1399_dataflow.png}
-    \caption{Task-level dataflow timing example \cite{amd2026vitisHls}}
+    \caption[Task-level dataflow timing example]{Task-level dataflow timing example \cite{amd2026vitisHls}}
     \label{fig:ug1399_dataflow}
 \end{figure}
 

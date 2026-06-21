@@ -17,6 +17,15 @@ The first objective of the evaluation is to verify that the hardware-oriented im
 
 \subsubsection{Verification Environment}
 
+The overall testing methodology is shown in Figure~\ref{fig:testing_env}. A set of test images ($256 \times 256$ RGB) drives two paths in parallel: the proposed HiFiC GAN accelerator running on the ZCU104 FPGA (the design under test) and a reference model, namely the original HiFiC FP32 network implemented in Python/PyTorch. For each test item, the accelerator output is compared against the reference output to produce a PASS/FAIL verdict for hardware behavior verification, while the reconstructed images are compared to quantify quality and performance through metrics such as speedup, PSNR/SSIM, latency, and compression ratio.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{Images/testing_env.png}
+    \caption{Testing environment: the accelerator under test compared against the HiFiC FP32 reference model}
+    \label{fig:testing_env}
+\end{figure}
+
 Figure~\ref{fig:system_architecture} illustrates the verification and deployment environment used in this thesis. The system follows a hardware--software co-design approach on the ZCU104 platform. The Processing System (PS) is responsible for software control, memory management, and accelerator invocation, while the Programmable Logic (PL) implements the custom generator accelerator.
 
 \begin{figure}[H]

@@ -1,6 +1,6 @@
 \newpage
 \section*{CHAPTER 3. IMPLEMENTATION}
-\phantomsection\addcontentsline{toc}{section}{CHAPTER 3. IMPLEMENTATION}
+\phantomsection\label{chap:implementation}\addcontentsline{toc}{section}{CHAPTER 3. IMPLEMENTATION}
 \setcounter{section}{3}
 \setcounter{figure}{0}
 \setcounter{subsection}{0}
@@ -15,28 +15,22 @@ The goal of this chapter is not to redefine the HiFiC algorithm, which has alrea
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{System-Level Architecture Design}
 
-\textbf{System specifications:}
-\begin{itemize}
-    \item Input data: RGB image with a resolution of $256 \times 256$.
-    \item Target model: Quantized HiFiC GAN inference for learned image compression and reconstruction.
-    \item Target platform: ZCU104 FPGA development board.
-    \item Design tools: C/C++ for accelerator modeling, Vitis HLS for hardware synthesis, Vivado for system integration, and Vitis for software control on the embedded processor.
-\end{itemize}
+This section describes how the design specifications introduced in Section~\ref{subsec:design_specs} of Chapter~1 -- a quantized HiFiC GAN generator accelerator on the ZCU104 platform, modeled in C/C++ and built with the Vitis HLS and Vivado tool flow -- are realized as a concrete hardware--software system.
 
-Figure~\ref{fig:flow_design} shows the overall implementation flow used in this thesis. The flow connects the software model, HLS accelerator design, FPGA system integration, and board-level execution into a single development process.
+Figure~\ref{fig:design_flow} shows the overall design flow followed in this thesis, organized into three phases: \emph{specification and analysis}, \emph{design and verification}, and \emph{synthesis and integration}.
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=\textwidth]{Images/Flow_design.png}
-    \caption{Overall implementation flow of the HiFiC GAN accelerator}
-    \label{fig:flow_design}
+    \includegraphics[width=\textwidth]{Images/Design_flow.png}
+    \caption{Overall design flow of the HiFiC GAN accelerator}
+    \label{fig:design_flow}
 \end{figure}
 
-The first stage analyzes the HiFiC inference pipeline and identifies the blocks that dominate computation. The model structure and parameters are then converted into a C/C++ implementation suitable for hardware synthesis. This C/C++ model is used as both the functional reference and the basis for the accelerator kernel.
+In the \textbf{specification and analysis} phase, the problem is defined together with the HiFiC GAN specification, followed by a state-of-the-art analysis and a system specification analysis. These steps lead to a hardware--software co-design architecture proposal that decides which parts of the inference pipeline are accelerated on the FPGA and which remain in software.
 
-The second stage uses Vitis HLS to synthesize the selected compute kernel into register-transfer level (RTL) hardware. During this step, loop pipelining, array partitioning, on-chip buffering, and interface directives are applied to expose parallelism and reduce unnecessary memory accesses. The generated RTL block is exported as an FPGA IP core.
+In the \textbf{design and verification} phase, the selected compute kernels are written as a C/C++ algorithm in Vitis HLS. In parallel, the pre-trained HiFiC model provides golden data for a C/C++ testbench environment. The HLS design is checked by C simulation against these golden outputs; if the results do not match, the C/C++ design is revised and the loop is repeated until functional correctness is achieved.
 
-The final stage integrates the IP core into a Zynq UltraScale+ system using Vivado. The accelerator is connected to external DDR memory and the Processing System (PS) through AXI interfaces. A Vitis software application configures the accelerator, transfers input data and parameters, starts execution, and collects output feature maps for the remaining stages of the image reconstruction pipeline.
+In the \textbf{synthesis and integration} phase, the verified design is passed through High-Level Synthesis, which produces a synthesis report and enables C/RTL co-simulation to confirm that the generated RTL behaves identically to the C model. If the design does not meet the target specifications, the C/C++ description is tuned -- through loop pipelining, array partitioning, on-chip buffering, and interface directives -- and re-synthesized. Once the targets are met, the IP core is exported and integrated into a Zynq UltraScale+ system using Vivado, where it is connected to external DDR memory and the Processing System (PS) through AXI interfaces and controlled from a Vitis software application.
 
 \subsubsection{HiFiC GAN Model-Level Data Path}
 
@@ -245,9 +239,31 @@ Although the residual blocks dominate the runtime, the proposed accelerator impl
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Detailed Internal Block Design}
 
-This section describes the internal architecture of the proposed accelerator. The entire HiFiC generator is implemented as a single HLS IP, \texttt{full\_generator\_top}, organized into three stages that share the same arithmetic style: the \textbf{Fusion Core} (initial convolution block, nine residual blocks, and the global skip addition), the \textbf{UpConv Core} (four transposed-convolution up-sampling blocks), and the \textbf{Conv77 Core} (the final $7\times7$ convolution that produces the RGB image). Packing the whole generator into one IP allows the multiply--accumulate (MAC) engines to be reused across stages and simplifies system integration, at the cost of a tight on-chip resource budget. The explanation below starts from the common building blocks -- data buffering and the processing element -- then describes the overall architecture and each of the three stages.
+This section describes the internal architecture of the proposed accelerator. The entire HiFiC generator is implemented as a single HLS IP, \texttt{full\_generator\_top}, organized into three main cores: the \textbf{Fusion Core} (executes the initial convolution block, nine residual blocks, and the global skip addition), the \textbf{UpConv Block Core} (executes four transposed-convolution up-sampling blocks), and the \textbf{Conv77 Core} (executes the final $7\times7$ convolution that produces the RGB image). Packing the whole generator into one IP allows the multiply--accumulate (MAC) engines to be reused across cores and simplifies system integration, at the cost of a tight on-chip resource budget. The explanation below begins with the overall accelerator architecture, then describes the common building blocks (data buffering and processing elements), and finally details the implementation of each core.
 
-\subsubsection{Line Buffer, Window, and Boundary Handling}
+\subsubsection{Overall Generator Accelerator Architecture}
+
+At the top level, the generator accelerator is organized into three cores, as shown in Figure~\ref{fig:gan_accelerator_concept}: the \textbf{Fusion Core}, the \textbf{UpConv Block Core}, and the \textbf{Conv77 Core}. Each core is an independent hardware module that communicates with external DDR memory through its own pair of AXI4 master interfaces -- one for reading input feature maps, weights, and parameters, and one for writing the resulting output feature maps. The cores are invoked sequentially under software control to realize the complete generator datapath. Internally, every core reuses the same convolution-then-normalization-and-activation motif, which is why a small number of hardware engines can implement the whole generator network. Because the Fusion Core is the largest and most representative of this pattern, its internal datapath is described in detail first, and the lighter UpConv Block and Conv77 cores are then presented as variations of it.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{Images/GAN_accelarator.png}
+    \caption{Overall architecture of the HiFiC GAN accelerator showing the three main cores (Fusion Core, UpConv Block Core, Conv77 Core) connected via AXI4 master interfaces}
+    \label{fig:gan_accelerator_concept}
+\end{figure}
+
+\subsubsection{Fusion Core}
+
+The Fusion Core executes the initial convolution block (CBI), the nine residual blocks, and the global skip addition. Its computational pattern is the residual block shown in Figure~\ref{fig:resblock_flow}: two $3\times3$ convolutions, each followed by normalization, with a ReLU between them and a skip connection that adds the block input to its output. The remainder of this subsection presents the core bottom-up: first the data-feeding building blocks (line buffer, window, and boundary handling), then the processing element that performs the arithmetic, then how these are assembled into a two-pass convolution-and-normalization datapath, and finally the complete Fusion Core block diagram.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1.0\textwidth]{Images/resblock.png}
+    \caption{Computational flow of a residual block in the HiFiC generator}
+    \label{fig:resblock_flow}
+\end{figure}
+
+\subsubsection*{Line Buffer, Window, and Boundary Handling}
 
 The convolution engine processes convolution windows in a streaming manner. Instead of repeatedly loading the same pixels or feature values from external memory, the design stores recently used rows in on-chip line buffers. For a $3 \times 3$ convolution, two previous rows are sufficient because the current row is provided by the input stream.
 
@@ -296,7 +312,7 @@ Boundary handling is implemented using reflection padding, as shown in Figure~\r
     \label{fig:reflection_padding}
 \end{figure}
 
-\subsubsection{Processing Element Architecture}
+\subsubsection*{Processing Element Architecture}
 
 The Processing Element (PE) is the basic arithmetic unit of the accelerator. Each PE computes one convolution result by multiplying input feature values with the corresponding kernel weights and accumulating the products.
 
@@ -311,23 +327,14 @@ As shown in Figure~\ref{fig:pe_architecture}, each PE contains eight parallel mu
 
 A key difficulty with FP16 accumulation is that a half-precision adder has a latency of three to four cycles, which would normally prevent a new accumulation every cycle. To still reach $\text{II}=1$, the design uses a \emph{rotating accumulator}: instead of a single accumulator, each PE keeps a small array of partial sums \texttt{psum[PE][D]} and rotates the write index every cycle (for example \texttt{acc\_idx = i \& 3} for depth four). The distance between two read-after-write dependencies on the same slot then equals the accumulator depth, which is greater than or equal to the adder latency, so the pipeline never stalls. After the loop finishes, the partial sums in each slot are reduced into the final result.
 
-\subsubsection{Overall Generator Accelerator Architecture}
+\subsubsection*{Two-Pass Convolution-and-Normalization Datapath}
 
-At a conceptual level, the accelerator is built from two reusable functional units, as shown in Figure~\ref{fig:gan_accelerator_concept}: a \textbf{Convolution Functional Unit (Conv FU)} that contains the MAC array (the PE cluster described above), and a \textbf{Normalization/Activation Functional Unit (Norm/Act FU)} that performs channel normalization and the activation function. Both units exchange data with external DDR memory through AXI4 master interfaces. Every stage of the generator -- Fusion, UpConv, and Conv77 -- reuses this same convolution-then-normalization motif, which is why a small number of hardware engines can implement the whole network.
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.9\textwidth]{Images/gan_accelerator_concept.png}
-    \caption{Conceptual architecture of the generator accelerator: a convolution functional unit (MAC array) and a normalization/activation functional unit sharing DDR access through AXI}
-    \label{fig:gan_accelerator_concept}
-\end{figure}
-
-Because each convolution layer is followed by normalization and activation, the datapath is naturally organized as two passes over the feature map: a convolution pass produced by the Conv FU, followed by a normalization-and-activation pass produced by the Norm/Act FU. Figure~\ref{fig:resblock_architecture} shows this datapath for a residual block, including input-feature buffering, weight buffering, the PE cluster, output buffering, the normalization/activation logic, and a skip-connection buffer.
+The line buffers and PE cluster described above are combined into two reusable functional units: a \textbf{Convolution Functional Unit (Conv FU)} that contains the MAC array (the PE cluster), and a \textbf{Normalization/Activation Functional Unit (Norm/Act FU)} that performs channel normalization and the activation function. Because each convolution layer is followed by normalization and activation, the datapath is naturally organized as two passes over the feature map: a convolution pass produced by the Conv FU, followed by a normalization-and-activation pass produced by the Norm/Act FU. Figure~\ref{fig:resblock_architecture} shows this datapath for a residual block, including input-feature buffering, weight buffering, the PE cluster, output buffering, the normalization/activation logic, and a skip-connection buffer.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.9\textwidth]{Images/resblock_architecture.png}
-    \caption{Convolution-then-normalization datapath shared by the generator stages, shown for a residual block}
+    \caption{Convolution-then-normalization datapath of the Fusion Core, shown for a residual block}
     \label{fig:resblock_architecture}
 \end{figure}
 
@@ -347,29 +354,27 @@ Figure~\ref{fig:two_pass_architecture} and Figure~\ref{fig:pipeline_timing} illu
     \label{fig:pipeline_timing}
 \end{figure}
 
-\subsubsection{Fusion Core (Stage 1)}
+\subsubsection*{Fusion Core Block Diagram}
 
-The Fusion Core executes the initial convolution block (CBI), the nine residual blocks, and the global skip addition. Its computational pattern is the residual block shown in Figure~\ref{fig:resblock_flow}: two $3\times3$ convolutions, each followed by normalization, with a ReLU between them and a skip connection that adds the block input to its output.
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=1.0\textwidth]{Images/resblock.png}
-    \caption{Computational flow of a residual block in the HiFiC generator}
-    \label{fig:resblock_flow}
-\end{figure}
-
-A single shared engine implements all of these blocks. Because the CBI, the nine residual blocks, and the global add all operate on the same $16\times16\times960$ tensor, they are mapped to one hardware instance that is invoked repeatedly with different parameters, rather than replicated. To keep this as a single instance, every call passes the same set of ports; if some calls passed null pointers and others did not, the tool would infer two different instances and exceed the on-chip memory budget. The engine uses sixteen PEs (128 MAC/cycle) with the rotating accumulator, and stores two large skip tensors in UltraRAM (URAM): a \emph{global skip buffer} that holds the CBI output until the global add, and a \emph{skip-connection buffer} that holds the input of each residual block until its residual add.
+A single shared engine implements the initial convolution block, the nine residual blocks, and the global skip addition. Because the CBI, the nine residual blocks, and the global add all operate on the same $16\times16\times960$ tensor, they are mapped to one hardware instance that is invoked repeatedly with different parameters, rather than replicated. To keep this as a single instance, every call passes the same set of ports; if some calls passed null pointers and others did not, the tool would infer two different instances and exceed the on-chip memory budget. The engine uses sixteen PEs (128 MAC/cycle) with the rotating accumulator, and stores two large skip tensors in UltraRAM (URAM): a \emph{global skip buffer} that holds the CBI output until the global add, and a \emph{skip-connection buffer} that holds the input of each residual block until its residual add. The complete block diagram, which brings together the AXI master interfaces, the input/weight/parameter buffers, the PE cluster, the normalization/activation logic, and the URAM skip buffers, is shown in Figure~\ref{fig:fusion_core}.
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=\textwidth]{Images/fusion_core.png}
+    \includegraphics[width=\textwidth]{Images/FusionCore_HighLevel.png}
     \caption{Block diagram of the Fusion Core: AXI master input, normalization, ping-pong buffers, the PE cluster (PE0--PE15), normalization/activation, and the URAM skip buffers}
     \label{fig:fusion_core}
 \end{figure}
 
-\subsubsection{UpConv Core (Stage 2)}
+\subsubsection{UpConv Block Core}
 
-The UpConv Core performs the four up-sampling blocks. Each block is a $3\times3$ transposed convolution with stride two that doubles the spatial resolution and halves the channel count, as summarized in Table~\ref{tab:upconv_steps}.
+The UpConv Block Core performs the four up-sampling blocks of the generator. As shown in Figure~\ref{fig:ucb_model}, each block follows the same network pattern: a $3\times3$ transposed convolution, followed by channel normalization and a ReLU activation. Every transposed convolution uses stride two, so each block doubles the spatial resolution and halves the channel count, as summarized in Table~\ref{tab:upconv_steps}.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.65\textwidth]{Images/UCB_Model_architeture.png}
+    \caption{Network pattern of an up-convolution block (UCB): a $3\times3$ transposed convolution followed by normalization and ReLU}
+    \label{fig:ucb_model}
+\end{figure}
 
 \begin{table}[H]
 \centering
@@ -390,18 +395,41 @@ UCB\_3 & $128\times128\times120$ & $256\times256\times60$ \\
 \end{tabular}
 \end{table}
 
-The transposed convolution is implemented by a \emph{scatter-and-accumulate} scheme: each input pixel distributes its MAC contributions to several output positions according to the $3\times3$ kernel and the stride-two pattern, accumulating into a row accumulator (\texttt{row\_acc}) stored in URAM and split into 32 banks for parallel access. The core uses eight PEs ($\text{PEs}_U = 8$, eight output channels in parallel) and applies a per-pixel normalization, in which the mean and variance are computed across channels at each output pixel before normalization and ReLU. As in the Fusion Core, a single shared engine serves all four blocks; the input source is selected by an internal mode parameter so that the tool infers only one hardware instance. Figure~\ref{fig:upconv_timing} shows the timing path of the up-convolution engine, in which the loading of input rows is overlapped with the computation of output rows.
+\subsubsection*{Computation Model: Transposed Convolution as Scatter}
+
+Following the scatter formulation of transposed convolution introduced in Chapter~2, this core implements each up-convolution block as a \emph{scatter-and-accumulate} operation: every input pixel distributes its weighted contributions to several output positions according to the $3\times3$ kernel and the stride-two pattern. Because of the stride, the input-to-output mapping is sparse, so for any given output row only part of the kernel taps actually contribute while the rest are skipped. As in the Fusion Core, a single shared engine serves all four blocks; the input source is selected by an internal mode parameter so that the tool infers only one hardware instance.
+
+\subsubsection*{Hardware Architecture: Differences from the Fusion Core}
+
+At the block level, the UpConv Block Core reuses almost the same organization as the Fusion Core: the same AXI master interfaces, input/weight/parameter buffering, streaming line buffers, and the overall convolution-then-normalization datapath. The one essential difference is the Processing Element: the standard PE of the Fusion Core is replaced by a \textbf{Transpose PE}, shown in Figure~\ref{fig:transpose_pe}. The Transpose PE keeps the same multiplier array, adder tree, and bias addition, but adds two extra stages at its output -- a \textbf{Scatter} stage and an \textbf{Accumulator} stage.
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=\textwidth]{Images/upconv_timing.png}
-    \caption{Timing path of the up-convolution engine, overlapping input-row loading with output-row computation}
+    \includegraphics[width=\textwidth]{Images/Transpose_PE.png}
+    \caption{Block diagram of the Transpose PE in the UpConv Block Core}
+    \label{fig:transpose_pe}
+\end{figure}
+
+To understand why these two stages are needed, it helps to contrast the two operations. In the Fusion Core, the convolution is a \emph{gather}: each output pixel collects a fixed $3\times3$ input window, so once a PE finishes its multiply-accumulate the result is already the final output value and can be written out in place. The computation is output-stationary, and a standard PE therefore needs nothing beyond its MAC and bias stages. The transposed convolution is the opposite, a \emph{scatter}: one input pixel, multiplied by the kernel, contributes to several different output positions, and conversely each output position receives contributions from several input pixels and kernel taps that are produced in different loop iterations. A Transpose PE result is thus only a \emph{partial} contribution to an output pixel, never its final value. This is precisely the gap that the Scatter and Accumulator stages close.
+
+\textbf{Why the Scatter stage.} A normal PE always writes its result to the same, in-place output location. A Transpose PE cannot, because the upsampling pattern sends each partial result to a different, non-contiguous output position. The Scatter stage performs this routing: from the input pixel position and the active kernel tap it computes the destination address in the output feature map and steers the partial result there. For the stride-two transposed convolution used here, an input pixel at column $w_i$ contributes through kernel tap $k_w$ to output column $w_o = 2\,w_i + k_w - 1$; the Scatter stage applies this index mapping so that each partial result lands at the correct upsampled position. In short, it replaces the fixed write address of a normal PE with a computed, data-dependent one dictated by the stride.
+
+\textbf{Why the Accumulator stage.} Because several partial results are scattered onto the \emph{same} output position at different times, that position cannot simply be overwritten -- each new contribution has to be \emph{added} to what is already there. The Accumulator stage carries out this read--modify--write: it reads the partial sum currently stored at the scattered output position, adds the new contribution, and writes the updated value back. These running sums are kept in a row-wide accumulation buffer (mapped to on-chip URAM) that persists across loop iterations until every input pixel has scattered its contribution; only at that point is an output pixel complete and ready for normalization. The Fusion Core needs neither stage, because its gather computation writes each output pixel exactly once and never has to read it back.
+
+\subsubsection*{Execution Timing}
+
+Figure~\ref{fig:upconv_timing} shows the timing path of the up-convolution engine, in which the loading of input rows is overlapped with the computation of output rows. The cycle counts in the figure are measured for the first up-convolution block, UCB\_0 (input $16\times16\times960$, output $32\times32\times480$): after a short initialization (\texttt{RESET\_ROW\_ACC}, $1{,}026$ cycles, and \texttt{LOAD\_PARAMS} for bias, beta, and gamma, $162$ cycles), the engine iterates the tile loop $41$ times, each iteration loading a weight tile ($4{,}449$ cycles) and performing the 8-channel MAC compute ($69{,}483$ cycles). The tile loop therefore dominates at $41 \times 69{,}483 = 2{,}848{,}803$ cycles, followed by the normalization-and-write stage (statistics and normalization, $23{,}363$ cycles), giving a total latency of $2{,}878{,}197$ cycles for UCB\_0.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{Images/UCB_timing.jpeg}
+    \caption{Timing path of the up-convolution engine for the first up-convolution block (UCB\_0), overlapping input-row loading with output-row computation. All cycle counts shown are measured for UCB\_0.}
     \label{fig:upconv_timing}
 \end{figure}
 
-\subsubsection{Conv77 Core (Stage 3)}
+\subsubsection{Conv77 Core}
 
-The Conv77 Core implements the final output block: reflection padding, a $7\times7$ convolution that maps the 60 feature channels to the 3 RGB channels, and a clipping operation. It combines two forms of parallelism: eight input channels are processed in parallel ($\text{SIMD\_DEPTH}=8$) and eight output windows are computed in parallel ($\text{NUM\_WIN\_PEs}=8$), which together with the $7\times7$ kernel reaches up to 448 MAC operations per cycle. Unlike the other two cores, the Conv77 Core uses only Block RAM (no URAM) for its small input-window and weight buffers. A final clipping to the range $[0,1]$ is applied, as required by the HiFiC specification for normalized images.
+The Conv77 Core implements the final output block: reflection padding, a $7\times7$ convolution that maps the 60 feature channels to the 3 RGB channels, and a clipping operation. Its Processing Element reuses the same architecture as the Fusion Core PE -- the same multiplier array, accumulation, and bias addition -- and differs only in the adder tree. Because the kernel is $7\times7$ instead of $3\times3$, each output value is the sum of a larger number of partial products, so the adder tree is widened and deepened accordingly to reduce them. Unlike the other two cores, the Conv77 Core uses only Block RAM (no URAM) for its small input-window and weight buffers. A final clipping to the range $[0,1]$ is applied, as required by the HiFiC specification for normalized images.
 
 \subsubsection{On-Chip Memory Layout}
 
@@ -415,9 +443,9 @@ Table~\ref{tab:onchip_buffers} summarizes the main on-chip buffers. Large, persi
 \hline
 \textbf{Buffer} & \textbf{Size} & \textbf{Type} & \textbf{Purpose} \\
 \hline
-Skip-connection buffer & $16\times16\times60$ & URAM & residual skip of each res\_block \\
+Skip-connection buffer & $16\times16\times960$ & URAM & residual skip of each res\_block \\
 \hline
-Global skip buffer & $16\times16\times60$ & URAM & CBI output for the global add \\
+Global skip buffer & $16\times16\times960$ & URAM & CBI output for the global add \\
 \hline
 Row accumulator & $256\times480$ & URAM (32 banks) & up-convolution output accumulation \\
 \hline
