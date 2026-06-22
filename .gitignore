@@ -13,9 +13,6 @@
 *.run.xml
 *.bcf
 
-# Ignore specific build PDF
-EDABK_LSI_Contest_2026_GAN/main.pdf
-
 # Others
 .omc/
 .DS_Store

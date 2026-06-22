@@ -4,6 +4,7 @@
 \newcommand{\EvalStudentOneId}{20224430}
 \newcommand{\EvalStudentTwo}{Đỗ Việt Dũng}
 \newcommand{\EvalStudentTwoId}{20224340}
+\newcommand{\EvalSupervisors}{\begin{tabular}[t]{@{}l@{}}PGS. TS. Nguyễn Đức Minh\\ TS. Hoàng Phương Chi\end{tabular}}
 \newcolumntype{C}[1]{>{\centering\arraybackslash}m{#1}}
 \newcolumntype{L}[1]{>{\raggedright\arraybackslash}m{#1}}
 
@@ -17,11 +18,11 @@
     \end{center}
 }
 
-\newcommand{\EvalInfo}[1]{%
+\newcommand{\EvalInfo}[2][\dotfill]{%
     \noindent\textbf{Tên đề tài:} \EvalProjectTitle\par
     \noindent\textbf{Họ tên SV:} \EvalStudentOne \hfill \textbf{MSSV:} \EvalStudentOneId\par
     \noindent\textbf{Họ tên SV:} \EvalStudentTwo \hfill \textbf{MSSV:} \EvalStudentTwoId\par
-    \noindent\textbf{#1:} \dotfill\par
+    \noindent\textbf{#2:} #1\par
     \vspace{0.2cm}
 }
 
@@ -39,11 +40,14 @@
 }
 
 \thispagestyle{empty}
-\fontsize{9pt}{10.8pt}\selectfont
+\small
 \EvalTop{(DÀNH CHO CÁN BỘ HƯỚNG DẪN)}
-\EvalInfo{Cán bộ hướng dẫn}
-\renewcommand{\arraystretch}{1.15}
-\begin{tabularx}{\textwidth}{|C{0.75cm}|C{2.25cm}|X|C{1.35cm}|}
+\EvalInfo[\EvalSupervisors]{Cán bộ hướng dẫn}
+{%
+\fontsize{10.86pt}{13pt}\selectfont
+\renewcommand{\tabularxcolumn}[1]{>{\fontsize{10.86pt}{13pt}\selectfont}m{#1}}%
+\renewcommand{\arraystretch}{1.0}%
+\noindent\begin{tabularx}{\textwidth}{|C{0.8cm}|C{2.5cm}|X|C{1.5cm}|}
 \hline
 \rowcolor{LightCyan}\textbf{STT} & \shortstack{\textbf{Tiêu chí}\\\textbf{(Điểm tối đa)}} & \centering\arraybackslash\textbf{Hướng dẫn đánh giá tiêu chí} & \shortstack{\textbf{Điểm}\\\textbf{tiêu chí}} \\
 \hline
@@ -59,8 +63,19 @@
 \hline
 \multicolumn{3}{|r|}{\textbf{Điểm hướng dẫn:}} & \\
 \hline
-\end{tabularx}
-\EvalFooter{Cán bộ hướng dẫn}
+\end{tabularx}%
+}
+\vspace{0.5cm}
+\begin{flushright}
+    \begin{minipage}{0.5\textwidth}
+        \centering
+        \textbf{CÁN BỘ HƯỚNG DẪN}\par
+        {\itshape (Ký và ghi rõ họ tên)}\par
+        \vspace{2.0cm}
+    \end{minipage}
+\end{flushright}
+\vfill
+{\itshape\fontsize{9pt}{11pt}\selectfont Điểm từng tiêu chí cho lẻ đến 0,5. Nếu Điểm tổng các tiêu chí $>$ 10 thì Điểm hướng dẫn làm tròn thành 10}
 \newpage
 
 \thispagestyle{empty}

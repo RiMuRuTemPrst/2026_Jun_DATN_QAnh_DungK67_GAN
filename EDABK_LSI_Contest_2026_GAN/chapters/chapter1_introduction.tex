@@ -96,7 +96,7 @@ Figure~\ref{fig:design_spec} gives an overview of the design. The HiFiC generato
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=\textwidth]{Images/Design_Spec.png}
+    \includegraphics[width=\textwidth]{Images/Design_spec_ver2.png}
     \caption{Overview of the proposed HiFiC GAN accelerator design and its mapping onto the FPGA platform}
     \label{fig:design_spec}
 \end{figure}
@@ -105,7 +105,7 @@ Figure~\ref{fig:design_spec} gives an overview of the design. The HiFiC generato
 \centering
 \caption{Design specifications of the proposed HiFiC GAN accelerator}
 \label{tab:design_specs}
-\begin{tabularx}{\textwidth}{|p{0.3\textwidth}|X|}
+\begin{tabularx}{\textwidth}{|>{\raggedright\arraybackslash}p{0.3\textwidth}|X|}
 \hline
 \textbf{Specification} & \textbf{Target} \\
 \hline
@@ -150,7 +150,7 @@ Beyond the headline targets listed in the design specifications (Table~\ref{tab:
 \centering
 \caption{Design Non-functional Requirements and Constraints}
 \label{tab:nonfunctional_req}
-\begin{tabularx}{\textwidth}{|p{0.3\textwidth}|X|}
+\begin{tabularx}{\textwidth}{|>{\raggedright\arraybackslash}p{0.3\textwidth}|X|}
 \hline
 \textbf{Requirement Category} & \textbf{Target Specification} \\
 \hline
@@ -177,7 +177,7 @@ To meet the design specifications and requirements defined above, this project a
 \caption{Proposed methodologies used in the project}
 \label{tab:methodologies}
 \renewcommand{\arraystretch}{1.3}
-\begin{tabularx}{\textwidth}{|c|p{0.34\textwidth}|X|}
+\begin{tabularx}{\textwidth}{|c|>{\raggedright\arraybackslash}p{0.34\textwidth}|X|}
 \hline
 \textbf{No.} & \textbf{Methodology} & \textbf{Impact} \\
 \hline
@@ -202,24 +202,25 @@ The overall work is divided into a sequence of phases, each with a defined deliv
 \centering
 \caption{Task planning and scheduling}
 \label{tab:task_planning}
-\renewcommand{\arraystretch}{1.3}
-\begin{tabularx}{\textwidth}{|c|p{0.30\textwidth}|c|X|}
+\renewcommand{\arraystretch}{1.2}
+\small
+\begin{tabularx}{\textwidth}{|c|>{\raggedright\arraybackslash}p{0.24\textwidth}|>{\raggedright\arraybackslash}p{0.16\textwidth}|c|X|}
 \hline
-\textbf{No.} & \textbf{Task} & \textbf{Period} & \textbf{Result} \\
+\textbf{No.} & \textbf{Task} & \textbf{Person in charge} & \textbf{Period} & \textbf{Result} \\
 \hline
-1 & Survey learned image compression models and prior CNN/GAN FPGA accelerators & 2 weeks & Define the design specifications and evaluation metrics \\
+1 & Survey learned image compression models and prior CNN/GAN FPGA accelerators & Truong Quoc Anh & 2 weeks & Define the design specifications and evaluation metrics \\
 \hline
-2 & Analyze the HiFiC generator and profile its workload & 1 week & Identify the residual blocks as the acceleration target and decide the HW/SW partition \\
+2 & Analyze the HiFiC generator and profile its workload & Truong Quoc Anh & 1 week & Identify the residual blocks as the acceleration target and decide the HW/SW partition \\
 \hline
-3 & Build the C/C++ reference model and testbench from the pre-trained HiFiC model & 2 weeks & Establish a golden reference for functional verification \\
+3 & Build the C/C++ reference model and testbench from the pre-trained HiFiC model & Do Viet Dung & 2 weeks & Establish a golden reference for functional verification \\
 \hline
-4 & Design and implement the HLS accelerator cores (Fusion, UpConv, Conv77) & 4 weeks & A functional generator accelerator described in synthesizable C/C++ \\
+4 & Design and implement the HLS accelerator cores (Fusion, UpConv, Conv77) & Truong Quoc Anh, Do Viet Dung & 4 weeks & A functional generator accelerator described in synthesizable C/C++ \\
 \hline
-5 & Apply mixed-precision quantization and HLS optimizations (pipelining, array partitioning, ping-pong buffering) & 3 weeks & Meet the throughput and resource targets \\
+5 & Apply mixed-precision quantization and HLS optimizations (pipelining, array partitioning, ping-pong buffering) & Truong Quoc Anh, Do Viet Dung & 3 weeks & Meet the throughput and resource targets \\
 \hline
-6 & Verify by C-simulation and C/RTL co-simulation, then integrate on the ZCU104 (Vivado, Vitis) & 3 weeks & A hardware-verified accelerator running on the board \\
+6 & Verify by C-simulation and C/RTL co-simulation, then integrate on the ZCU104 (Vivado, Vitis) & Truong Quoc Anh, Do Viet Dung & 3 weeks & A hardware-verified accelerator running on the board \\
 \hline
-7 & Evaluate accuracy, resource utilization, and performance against the CPU baseline; write the thesis and slides & 3 weeks & Comprehensive results and the graduation report \\
+7 & Evaluate accuracy, resource utilization, and performance against the CPU baseline; write the thesis and slides & Do Viet Dung & 3 weeks & Comprehensive results and the graduation report \\
 \hline
 \end{tabularx}
 \end{table}

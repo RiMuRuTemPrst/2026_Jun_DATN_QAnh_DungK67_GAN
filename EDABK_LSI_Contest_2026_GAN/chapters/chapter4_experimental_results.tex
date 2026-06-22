@@ -78,6 +78,41 @@ The target board used for implementation is the Zynq\texttrademark{} UltraScale+
 
 The verification flow consists of four main steps. First, the Python reference model produces the expected reconstructed output or intermediate feature output. Second, the HLS C/C++ model processes the same input data using the hardware-oriented implementation. Third, the two outputs are compared using objective image-quality metrics. Finally, after synthesis and implementation, the accelerator is controlled from Vitis on the ZCU104 platform to measure board-level behavior.
 
+\subsubsection{Functional Verification Results}
+
+Before board-level deployment, the hardware-oriented C/C++ model of every generator stage was validated against the FP32 golden tensors exported from the original HiFiC model through C-simulation (CSIM). A block is considered to PASS when its maximum absolute error stays below the tolerance assigned to that stage and no output element is reported as a mismatch. Table~\ref{tab:csim_verification} summarizes the block-level results obtained on real input data.
+
+\begin{table}[H]
+\centering
+\caption{Block-level functional verification (CSIM) against the FP32 golden reference}
+\label{tab:csim_verification}
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{|l|c|c|c|c|}
+\hline
+\textbf{Block} & \textbf{Tensor shape (in $\rightarrow$ out)} & \textbf{Max abs. error} & \textbf{RMSE} & \textbf{Mismatch} \\
+\hline
+CBI & $16\times16\times220 \rightarrow 960$ & 0.01953 & 0.00169 & 0 / 245,760 \\
+\hline
+ResBlock & $16\times16\times960 \rightarrow 960$ & 0.01953 & 0.000978 & 0 / 245,760 \\
+\hline
+GlobalAdd & $16\times16\times960$ & 0.02344 & 0.00178 & 0 / 245,760 \\
+\hline
+UCB\_0 & $16\times16\times960 \rightarrow 32\times32\times480$ & 0.00781 & 0.000591 & 0 / 491,520 \\
+\hline
+UCB\_1 & $32\times32\times480 \rightarrow 64\times64\times240$ & 0.01367 & 0.001061 & 0 / 983,040 \\
+\hline
+UCB\_2 & $64\times64\times240 \rightarrow 128\times128\times120$ & 0.02148 & 0.002284 & 0 / 1,966,080 \\
+\hline
+UCB\_3 & $128\times128\times120 \rightarrow 256\times256\times60$ & 0.01563 & 0.001405 & 0 / 3,932,160 \\
+\hline
+Conv77 & $256\times256\times60 \rightarrow 3$ & 0.488 & 0.162 & 0 / 196,608 \\
+\hline
+\end{tabular}
+\end{table}
+
+Every block passes with zero element mismatches, which confirms that the mixed-precision FP16 datapath reproduces the reference behavior of the generator. For all feature-map stages the error magnitude is small, with an RMSE on the order of $10^{-3}$. The Conv77 output is evaluated with a relaxed tolerance because its final \texttt{Clip}$(0,1)$ together with the FP16 accumulation over a $7\times7$ window produces a slightly larger but still visually negligible deviation, which is further confirmed by the image-quality metrics reported in the following subsections.
+
 \subsubsection{Test Images and Evaluation Metrics}
 
 The evaluation uses representative RGB images resized to $256 \times 256$, consistent with the input size used throughout this thesis. The reconstructed images are evaluated using image-quality metrics introduced in Chapter~2, including Peak Signal-to-Noise Ratio (PSNR), Structural Similarity Index Measure (SSIM), and Mean Squared Error (MSE). These metrics are suitable for checking whether the quantized hardware-oriented implementation remains close to the software reference.
@@ -184,6 +219,34 @@ The hardware utilization report is summarized in Table~\ref{tab:hific_generator_
 
 The utilization results show that the proposed accelerator is both computation-intensive and memory-intensive. DSP utilization is high because convolution dominates the generator workload and requires a large number of multiply--accumulate operations. BRAM and URAM utilization are also high because intermediate feature maps, line buffers, weights, the up-convolution row accumulator, and the skip-connection buffers must be stored locally to reduce external DDR access and sustain the pipelined datapath; in particular, all available URAM blocks are used.
 
+To show how each core contributes to the overall cost, Table~\ref{tab:resource_breakdown} reports the per-core resource utilization (absolute count and the corresponding share of the device resources). The Fusion and UpConv cores dominate DSP usage because they perform the bulk of the multiply--accumulate work, whereas the Conv77 core is comparatively LUT-heavy due to its final \texttt{Clip}$(0,1)$ stage. The URAM blocks are concentrated in the UpConv core, which stores the row accumulator and the sliding-window buffers required by the transposed convolution.
+
+\begin{table}[H]
+    \centering
+    \caption{Per-core resource utilization of the generator accelerator}
+    \label{tab:resource_breakdown}
+    \small
+    \setlength{\tabcolsep}{4pt}
+    \renewcommand{\arraystretch}{1.2}
+    \begin{tabular}{|l|c|c|c|c|c|}
+        \hline
+        \textbf{Core} & \textbf{BRAM\_18K} & \textbf{DSP} & \textbf{FF} & \textbf{LUT} & \textbf{URAM} \\
+        \hline
+        Fusion Core & 208 (33\%) & 558 (32\%) & 62,081 (13\%) & 51,574 (22\%) & 16 (17\%) \\
+        \hline
+        UpConv Core & 144 (23\%) & 576 (33\%) & 56,246 (12\%) & 45,921 (20\%) & 36 (38\%) \\
+        \hline
+        Conv77 Core & 56 (9\%) & 448 (26\%) & 41,896 (9\%) & 69,081 (30\%) & 0 (0\%) \\
+        \hline
+        Other / overhead & 193 (31\%) & 32 (2\%) & 15,521 (3\%) & 15,798 (7\%) & 16 (17\%) \\
+        \hline
+        \textbf{Total} & \textbf{601 (96\%)} & \textbf{1,614 (93\%)} & \textbf{175,744 (38\%)} & \textbf{182,374 (79\%)} & \textbf{68 (71\%)} \\
+        \hline
+    \end{tabular}
+\end{table}
+
+In Table~\ref{tab:resource_breakdown}, the percentage in each cell is taken relative to the resources available on the XCZU7EV device (624 BRAM\_18K, 1{,}728 DSP, 460{,}800 FF, 230{,}400 LUT, and 96 URAM). The figures correspond to the synthesis estimate of each core before the final data-buffer rebalancing step (PIPO double-buffering), which redistributes storage between BRAM and URAM and moves part of the FP16 multipliers from the DSP slices to LUT fabric without changing functionality. The fully implemented design therefore closes at the slightly different resource figures reported in Table~\ref{tab:hific_generator_utilization} (1,550 DSPs, 510 BRAMs, all 96 URAMs, and 205,233 LUTs).
+
 Power measurement is evaluated as part of board-level deployment. In this design, the main contributors to dynamic power are expected to be DSP activity, BRAM/URAM access, AXI memory transfers, and clocked control logic. Therefore, reducing unnecessary memory movement and improving data reuse are important not only for performance but also for power efficiency.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -218,6 +281,95 @@ Table~\ref{tab:performance_evaluation} summarizes the main performance results. 
     \end{tabular}
 \end{table}
 
+The total workload of the generator and its distribution across blocks are summarized in Table~\ref{tab:compute_volume}. The MAC count is derived directly from the tensor dimensions, using
+\[
+\text{MACs}_{\text{conv}} = H_{out}\,W_{out}\,C_{out}\,C_{in}\,K_H\,K_W,
+\qquad
+\text{MACs}_{\text{convT}} = H_{in}\,W_{in}\,C_{in}\,C_{out}\,K_H\,K_W,
+\]
+for standard and transposed convolution, respectively. The nine residual blocks dominate the workload with 38.22~GMAC, whereas the four up-convolution blocks each contribute an identical 1.062~GMAC: although every UCB halves the channel count, it quadruples the spatial resolution, so the transposed-convolution MAC count remains constant across the four stages.
+
+\begin{table}[H]
+    \centering
+    \caption{Compute volume (MAC operations) of the generator blocks}
+    \label{tab:compute_volume}
+    \small
+    \renewcommand{\arraystretch}{1.2}
+    \begin{tabular}{|l|c|c|c|c|}
+        \hline
+        \textbf{Block} & \textbf{$C_{in}\rightarrow C_{out}$} & \textbf{Spatial out} & \textbf{Kernel} & \textbf{MACs} \\
+        \hline
+        CBI & $220\rightarrow960$ & $16\times16$ & $3\times3$ & 2.123~G \\
+        \hline
+        ResBlock $\times 9$ & $960\rightarrow960$ & $16\times16$ & $3\times3$ & 38.220~G \\
+        \hline
+        GlobalAdd & --- & $16\times16$ & --- & $\sim0$ \\
+        \hline
+        UCB\_0 & $960\rightarrow480$ & $32\times32$ & $3\times3$ & 1.062~G \\
+        \hline
+        UCB\_1 & $480\rightarrow240$ & $64\times64$ & $3\times3$ & 1.062~G \\
+        \hline
+        UCB\_2 & $240\rightarrow120$ & $128\times128$ & $3\times3$ & 1.062~G \\
+        \hline
+        UCB\_3 & $120\rightarrow60$ & $256\times256$ & $3\times3$ & 1.062~G \\
+        \hline
+        Conv77 & $60\rightarrow3$ & $256\times256$ & $7\times7$ & 0.578~G \\
+        \hline
+        \textbf{Total} & & & & \textbf{45.17~GMAC (90.34~GOP)} \\
+        \hline
+    \end{tabular}
+\end{table}
+
+The latency of the design is deterministic and is obtained from the per-loop synthesis report multiplied by the actual trip counts. Table~\ref{tab:latency_breakdown} lists the cycle count and the corresponding latency at 300~MHz for each stage. The Fusion Core accounts for the largest share (568.8~ms), driven by the nine residual blocks; the UpConv Core takes 149.0~ms after the dataflow optimization, and the Conv77 Core completes in about 17.75~ms.
+
+\begin{table}[H]
+    \centering
+    \caption{Latency breakdown of the generator stages at 300~MHz}
+    \label{tab:latency_breakdown}
+    \small
+    \renewcommand{\arraystretch}{1.2}
+    \begin{tabular}{|l|l|c|c|}
+        \hline
+        \textbf{Stage} & \textbf{Component} & \textbf{Cycles} & \textbf{Latency} \\
+        \hline
+        \multirow{3}{*}{Fusion} & CBI & 8,980,370 & 29.93~ms \\
+        \cline{2-4}
+         & ResBlock $\times 9$ & 161,646,705 & 538.82~ms \\
+        \cline{2-4}
+         & GlobalAdd & 15,507 & 0.05~ms \\
+        \hline
+        UpConv & $4\times$ UCB (after dataflow opt.) & --- & 149.0~ms \\
+        \hline
+        Conv77 & Conv $7\times7$ + Clip & $\sim$5.3\,M & 17.75~ms \\
+        \hline
+        \multicolumn{2}{|l|}{\textbf{Total (per image)}} & & \textbf{735.6~ms} \\
+        \hline
+    \end{tabular}
+\end{table}
+
+Finally, Table~\ref{tab:throughput_breakdown} reports the sustained throughput and the MAC-array efficiency of each core, computed as the ratio between the achieved and the peak MAC rate. The Fusion Core reaches 141.9~GOPS at about 92\% MAC efficiency thanks to the rotating accumulator that sustains an initiation interval of one; the UpConv Core reaches 57.0~GOPS (74\%), and the Conv77 Core 65.1~GOPS. The lower efficiency of the Conv77 Core is expected because it processes a comparatively small workload (0.578~GMAC) whose latency is dominated by pipeline fill/drain and boundary padding rather than by the MAC array. Aggregated over the sequential execution of the three stages, the design sustains 122.8~GOPS.
+
+\begin{table}[H]
+    \centering
+    \caption{Per-core throughput and MAC-array efficiency at 300~MHz}
+    \label{tab:throughput_breakdown}
+    \small
+    \renewcommand{\arraystretch}{1.2}
+    \begin{tabular}{|l|c|c|c|c|c|}
+        \hline
+        \textbf{Core} & \textbf{Peak MAC/cy} & \textbf{Peak GOPS} & \textbf{Latency} & \textbf{Achieved GOPS} & \textbf{MAC eff.} \\
+        \hline
+        Fusion & 256 & 153.6 & 568.8~ms & 141.9 & 92\% \\
+        \hline
+        UpConv & 128 & 76.8 & 149.0~ms & 57.0 & 74\% \\
+        \hline
+        Conv77 & 448 & 268.8 & 17.75~ms & 65.1 & 24\% \\
+        \hline
+        \textbf{Full generator} & --- & --- & \textbf{735.6~ms} & \textbf{122.8} & --- \\
+        \hline
+    \end{tabular}
+\end{table}
+
 The performance result shows that the accelerator benefits from parallel DSP computation and local on-chip buffering. The Fusion Core, which executes the convolution-heavy residual blocks, reaches about 92\% of its peak MAC throughput thanks to the rotating accumulator and the overlapped convolution and normalization passes; the UpConv and Conv77 cores are less MAC-bound because their latency also includes pipeline fill/drain and boundary handling. The high BRAM, URAM, and DSP utilization indicates that further performance scaling must be balanced carefully against the remaining device resources.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -231,7 +383,7 @@ The software baseline corresponds to the full generator inference profiled on an
     \centering
     \caption{Performance comparison between the software baseline and the proposed FPGA accelerator}
     \label{tab:performance_comparison}
-    \begin{tabular}{|p{2.6cm}|p{3.6cm}|c|c|c|}
+    \begin{tabular}{|>{\raggedright\arraybackslash}p{2.6cm}|>{\raggedright\arraybackslash}p{3.6cm}|c|c|c|}
         \hline
         \textbf{Platform} & \textbf{Device} & \textbf{Precision} & \textbf{Latency} & \textbf{Speedup} \\
         \hline
@@ -255,6 +407,6 @@ The comparison shows that running the full generator on the FPGA reduces the per
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Chapter Conclusion}
 
-Chapter 4 presented the experimental results of the proposed quantized HiFiC GAN accelerator. The accuracy evaluation compared the HLS simulation output with the Python reference model using PSNR over 100 test images, and the mixed-precision quantization results showed that compression ratio, PSNR, and SSIM are preserved when moving from FP32 to FP16. The resource utilization report showed that the design uses a large portion of the available DSP, BRAM, and URAM resources (all URAM blocks are used), which is expected for a highly parallel full-generator accelerator. The performance evaluation demonstrated an operating frequency of 300~MHz (timing closed at 308.74~MHz), a total latency of 735.6~ms per image, a throughput of 122.8~GOPS, and an acceleration of approximately $1459\times$ over the CPU software baseline.
+Chapter 4 presented the experimental results of the proposed quantized HiFiC GAN accelerator. Block-level C-simulation against the FP32 golden reference passed with zero element mismatches across all generator stages, and the accuracy evaluation further compared the HLS simulation output with the Python reference model using PSNR over 100 test images; the mixed-precision quantization results showed that compression ratio, PSNR, and SSIM are preserved when moving from FP32 to FP16. The resource utilization report showed that the design uses a large portion of the available DSP, BRAM, and URAM resources (all URAM blocks are used), which is expected for a highly parallel full-generator accelerator. The performance evaluation demonstrated an operating frequency of 300~MHz (timing closed at 308.74~MHz), a total compute volume of 90.34~GOP, a total latency of 735.6~ms per image (568.8~ms Fusion, 149.0~ms UpConv, 17.75~ms Conv77), a throughput of 122.8~GOPS, and an acceleration of approximately $1459\times$ over the CPU software baseline.
 
 Overall, the results confirm that the proposed hardware--software co-design is suitable for accelerating the complete HiFiC generator while preserving reconstruction quality.
