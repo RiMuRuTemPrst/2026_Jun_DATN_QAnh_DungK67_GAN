@@ -1,0 +1,7 @@
+# Treat binary assets as binary: no line-ending conversion, no text diff/merge
+*.pdf  binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gz   binary
+*.drawio.png binary
