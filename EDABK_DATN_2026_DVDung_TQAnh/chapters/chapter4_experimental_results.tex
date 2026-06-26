@@ -199,7 +199,7 @@ The hardware utilization report is summarized in Table~\ref{tab:hific_generator_
 
 \begin{table}[H]
     \centering
-    \caption{Hardware resource utilization of the full HiFiC generator accelerator on the ZCU104}
+    \caption{Hardware resource utilization and power of the full HiFiC generator accelerator on the ZCU104}
     \label{tab:hific_generator_utilization}
     \begin{tabular}{|l|c|}
         \hline
@@ -216,6 +216,8 @@ The hardware utilization report is summarized in Table~\ref{tab:hific_generator_
         DSPs & 1,550 (90\%) \\
         \hline
         Max frequency (MHz) & 308.74 \\
+        \hline
+        Total on-chip power (W) & $\approx$10.2 \\
         \hline
     \end{tabular}
 \end{table}
@@ -250,7 +252,7 @@ To show how each core contributes to the overall cost, Table~\ref{tab:resource_b
 
 In Table~\ref{tab:resource_breakdown}, the percentage in each cell is taken relative to the resources available on the XCZU7EV device (624 BRAM\_18K, 1{,}728 DSP, 460{,}800 FF, 230{,}400 LUT, and 96 URAM). The figures correspond to the synthesis estimate of each core before the final data-buffer rebalancing step (PIPO double-buffering), which redistributes storage between BRAM and URAM and moves part of the FP16 multipliers from the DSP slices to LUT fabric without changing functionality. The fully implemented design therefore closes at the slightly different resource figures reported in Table~\ref{tab:hific_generator_utilization} (1,550 DSPs, 510 BRAMs, all 96 URAMs, and 205,233 LUTs).
 
-On-board power was not measured in this work; a quantitative power evaluation is left for future board-level deployment. Qualitatively, the main contributors to dynamic power are DSP activity, BRAM/URAM access, AXI memory transfers, and clocked control logic, so reducing unnecessary memory movement and improving data reuse are important not only for performance but also for power efficiency. As an order-of-magnitude reference, the ZCU104 programmable logic typically operates within an envelope of roughly 8--15~W for designs at this utilization, about an order of magnitude below desktop- and laptop-class GPUs ($\sim$60--80~W). This favorable power envelope, rather than raw wall-clock latency, is the basis for the performance-per-watt argument discussed in the comparison below.
+On-board (silicon) power was not measured in this work; instead, the design power was estimated with the Vivado power analysis tool after synthesis, and a direct measurement on the physical board is left for future deployment. For the synthesized full generator constrained at 300~MHz, Vivado reports a total on-chip power of approximately 10.2~W, comprising about 9.6~W of dynamic power and 0.7~W of static device leakage. Consistent with the compute-bound, DSP-heavy nature of the design, the dynamic power is dominated by the DSP arithmetic ($\approx$3.0~W), the CLB logic ($\approx$2.6~W), and signal switching ($\approx$1.8~W), while the BRAM and URAM buffers together account for about 1.1~W; this confirms that reducing unnecessary memory movement and improving data reuse benefit power as well as performance. The estimate is vectorless (default switching activity, medium confidence) and therefore approximate, but it places the programmable-logic power at roughly 10~W---about $8\times$ below the 79.65~W measured for the same generator on a desktop-class GPU. This low absolute power envelope, suited to embedded and thermally constrained deployment rather than to winning raw wall-clock latency, is the angle developed in the comparison below.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Performance Evaluation}
@@ -401,7 +403,7 @@ The software baseline corresponds to the full generator inference profiled on an
 
 The comparison shows that running the full generator on the FPGA reduces the per-image processing time from 1073.19~s on the CPU to 735.6~ms, an acceleration of approximately $1459\times$, while sustaining a throughput of 122.8~GOPS. This large speedup is obtained even though the FPGA operates at a much lower clock frequency than the CPU, because the accelerator exploits spatial parallelism through many processing elements, local on-chip buffering, and overlapped convolution and normalization passes that keep the MAC datapath busy. The result confirms that dedicated hardware is essential for the compute-bound HiFiC generator, whose very large feature tensors make plain CPU execution impractical.
 
-It should be emphasized that these speedup ratios are measured against the single-threaded, unoptimized reference C implementation and therefore quantify acceleration over that specific software reference rather than over peak-optimized software. An optimized, multi-threaded CPU library (for example, oneDNN) executes the same generator in a few hundred milliseconds, comparable to the FPGA, and a desktop-class GPU is faster still in raw wall-clock time (25.1~ms). The proposed accelerator is therefore not positioned as the fastest wall-clock platform; its advantage lies in deterministic, low-latency inference within an embedded power envelope (programmable-logic power on the order of 8--15~W, against roughly 60--80~W for the GPU), that is, a favorable performance-per-watt for resource-constrained deployment. A full performance-per-watt comparison based on on-board power measurement is left for future work.
+It should be emphasized that these speedup ratios are measured against the single-threaded, unoptimized reference C implementation and therefore quantify acceleration over that specific software reference rather than over peak-optimized software. An optimized, multi-threaded CPU library (for example, oneDNN) executes the same generator in a few hundred milliseconds, comparable to the FPGA, and a desktop-class GPU is faster still in raw wall-clock time (25.1~ms). The proposed accelerator is therefore not positioned as the fastest wall-clock platform; its advantage lies in deterministic, low-latency inference within a low power envelope---an estimated programmable-logic power of about 10.2~W, roughly $8\times$ below the 79.65~W measured for the GPU---which suits embedded and resource-constrained deployment. A board-level power measurement to refine this Vivado estimate is left for future work.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Chapter Conclusion}
